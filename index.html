@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Number Up</title>
+
+    <script>
+        // Debug print gate — routes console.log through a flag set from the Lua
+        // config (config.DebugPrints). Off by default so the console stays quiet.
+        // Early logs are buffered and flushed if debug is turned on. Warnings and
+        // errors are never gated. Must run before any other script.
+        (function () {
+            var nativeLog = console.log.bind(console);
+            var buffer = [];
+            var MAX = 500;
+            window.glitchDebug = false;
+            console.log = function () {
+                if (window.glitchDebug) { nativeLog.apply(console, arguments); return; }
+                if (buffer.length < MAX) buffer.push(Array.prototype.slice.call(arguments));
+            };
+            window.setGlitchDebug = function (on) {
+                window.glitchDebug = !!on;
+                if (window.glitchDebug) {
+                    for (var i = 0; i < buffer.length; i++) nativeLog.apply(console, buffer[i]);
+                }
+                buffer = [];
+            };
+        })();
+    </script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+
+    <style>
+        html, body {
+            background: transparent !important;
+            overflow: hidden;
+        }
+
+        body::before, body::after {
+            display: none !important;
+            content: none !important;
+        }
+    </style>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+        :root {
+            /* Themeable colors - updated to match the amber/gold theme from the image */
+            --primary-color: #f5c443;
+            --secondary-color: #bfa02c;
+            --success-color: #f5c443;
+            --failure-color: #ff4444;
+            --warning-color: #fbbf24;
+            --background-color: #1a1915;
+            --background-gradient-1: #151411;
+            --background-gradient-2: #24221b;
+            --background-secondary: #0a0d10;
+            --background-tertiary: #14171a;
+            --border-color: #5a5440;
+            --text-color: #e6e1da;
+            --text-secondary-color: #a19d94;
+            --danger-color: #cc0000;
+            --safe-color: #22c55e;
+            --background-opacity: 0.95;
+            --background-gradient-1-alpha: rgba(21, 20, 17, 0.95);
+            --background-gradient-2-alpha: rgba(36, 34, 27, 0.95);
+            --background-secondary-alpha: rgba(10, 13, 16, 0.85);
+            --background-tertiary-alpha: rgba(20, 23, 26, 0.95);
+            
+            /* Minigame specific colors */
+            --minigame-color-1: #273cfcff;
+            --minigame-color-2: #2add57ff;
+            --minigame-color-3: #28e757ff;
+            --minigame-color-4: #edeb64ff;
+            --minigame-color-5: #eb87deff;
+            
+            /* Legacy variables for compatibility */
+            --neon-blue: var(--primary-color);
+            --light-blue: var(--primary-color);
+            --dark-blue: var(--background-gradient-1);
+            --dark-bg: var(--background-gradient-1);
+            --safe-zone: var(--safe-color);
+            --glow: rgba(245, 196, 67, 0.4);
+            --glow-color: var(--primary-color);
+            --background: var(--background-color);
+            --text: var(--text-color);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Share Tech Mono', monospace;
+        }
+
+        body {
+            background-color: transparent !important;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        body.sequence-active {
+            cursor: none !important;
+        }
+
+        #hack-container {
+            background: linear-gradient(135deg, var(--background-gradient-1-alpha) 0%, var(--background-gradient-2-alpha) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            width: 600px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+            display: none;
+            overflow: hidden;
+        }
+
+        .hack-title, .pulse-container, .hack-info, .timer-container, .hack-controls {
+            border-radius: 8px;
+        }
+
+        .hack-title {
+            color: white;
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 18px;
+            text-shadow: 0 0 10px var(--glow);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 10px;
+        }
+
+        .blink {
+            animation: blink 1s infinite;
+            color: var(--warning-color);
+        }
+
+        .pulse-container {
+            display: flex;
+            align-items: center;
+            height: 100px;
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        .wall {
+            width: 8px;
+            height: 80px;
+            background: linear-gradient(to bottom, var(--light-blue), var(--neon-blue));
+            border-radius: 4px;
+            box-shadow: 0 0 10px var(--glow);
+        }
+
+        .pulse-track {
+            flex: 1;
+            height: 40px;
+            background: linear-gradient(to bottom, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.4));
+            margin: 0 5px;
+            position: relative;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+        }
+
+        .safe-zone {
+            position: absolute;
+            background: linear-gradient(to bottom, rgba(54, 255, 0, 0.2), rgba(54, 255, 0, 0.4));
+            border: 1px solid rgba(54, 255, 0, 0.6);
+            height: 100%;
+            width: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            box-shadow: 0 0 8px var(--safe-zone);
+            transition: left 0.3s ease-out;
+            border-radius: 4px;
+        }
+
+        .pulse-bar {
+            position: absolute;
+            width: 15px;
+            height: 100%;
+            background: linear-gradient(to bottom, var(--light-blue), var(--neon-blue));
+            border-radius: 4px;
+            box-shadow: 0 0 10px var(--glow);
+            left: 0;
+        }
+
+        .hack-info {
+            display: flex;
+            justify-content: space-between;
+            color: white;
+            margin: 10px 0;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .counter {
+            color: var(--light-blue);
+            font-size: 18px;
+        }
+
+        .message {
+            color: #ffffff;
+            font-size: 16px;
+        }
+
+        .hack-controls {
+            display: flex;
+            justify-content: center;
+        }
+
+        #hack-button {
+            background: linear-gradient(to bottom, rgba(0, 120, 215, 0.6), rgba(0, 90, 180, 0.6));
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 10px 30px;
+            cursor: pointer;
+            font-size: 16px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+            transition: all 0.2s;
+            border-radius: 4px;
+        }
+
+        #hack-button:hover {
+            background: linear-gradient(to bottom, rgba(0, 140, 235, 0.7), rgba(0, 100, 200, 0.7));
+            box-shadow: 0 1px 5px rgba(0, 120, 215, 0.5);
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .success-bar {
+            background: var(--success-color) !important;
+            box-shadow: 0 0 15px var(--success-color) !important;
+        }
+
+        .fail-bar {
+            background: var(--failure-color) !important;
+            box-shadow: 0 0 15px var(--failure-color) !important;
+        }
+
+        .timer-container {
+            margin-top: 15px;
+            margin-bottom: 15px;
+            position: relative;
+            width: 100%;
+        }
+
+        .timer-bar {
+            height: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            width: 100%;
+            height: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        .timer-progress {
+            height: 100%;
+            background: linear-gradient(to right, var(--danger-color), var(--warning-color));
+            width: 100%;
+            transition: width 0.1s linear;
+            border-radius: 3px;
+        }
+
+        .timer-text {
+            color: white;
+            text-align: center;
+            margin-top: 5px;
+        }
+
+        body, html {
+            background-color: transparent !important;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .game-container {
+            display: none;
+            flex-direction: column;
+            background: linear-gradient(135deg, var(--background-gradient-1-alpha) 0%, var(--background-gradient-2-alpha) 100%);
+            border-radius: 10px;
+            padding: 20px;
+            width: 600px;
+            margin: 0 auto;
+        }
+
+        .game-container.active {
+            display: flex !important;
+        }
+
+        #number-up-container {
+            width: 520px;
+            border: 1px solid rgba(255,255,255,0.12);
+            box-shadow: 0 6px 28px rgba(0,0,0,0.6);
+        }
+
+        .number-up-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .number-up-next-label {
+            font-size: 13px;
+            color: var(--text-secondary-color);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .number-up-next-value {
+            font-size: 26px;
+            color: var(--primary-color);
+            text-shadow: 0 0 12px var(--primary-color);
+            letter-spacing: 0.12em;
+            margin-left: 8px;
+        }
+
+        .number-up-stats {
+            font-size: 12px;
+            color: var(--text-secondary-color);
+            text-align: right;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .number-up-stats span { color: var(--text-color); }
+
+        /* Completion progress bar (not timer) */
+        .number-up-progress-bar {
+            width: 100%;
+            height: 4px;
+            background: rgba(255,255,255,0.06);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        .number-up-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--primary-color);
+            border-radius: 2px;
+            transition: width 0.15s ease;
+        }
+
+        /* Number grid */
+        #number-up-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .number-up-cell {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(var(--background-secondary-rgba, 0,20,40), 0.8);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 5px;
+            font-size: 15px;
+            color: var(--text-color);
+            cursor: pointer;
+            user-select: none;
+            font-family: 'Share Tech Mono', monospace;
+            letter-spacing: 0.05em;
+            transition: background 0.1s ease, border-color 0.1s ease, color 0.1s ease;
+        }
+
+        .number-up-cell:hover {
+            background: rgba(var(--primary-rgba, 51,181,229), 0.1);
+            border-color: rgba(var(--primary-rgba, 51,181,229), 0.4);
+        }
+
+        .number-up-cell.nu-clicked {
+            background: rgba(var(--primary-rgba, 51,181,229), 0.18);
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+            cursor: default;
+            opacity: 0.55;
+        }
+
+        .number-up-cell.nu-wrong {
+            background: rgba(255, 68, 68, 0.25);
+            border-color: var(--failure-color);
+            color: var(--failure-color);
+        }
+
+        /* Bottom info row */
+        .number-up-bottom {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: var(--text-secondary-color);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .number-up-bottom span { color: var(--text-color); }
+
+        #number-up-message {
+            font-size: 12px;
+            color: var(--text-secondary-color);
+            text-align: right;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .number-up-timer-bar {
+            width: 100%;
+            height: 3px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .number-up-timer-progress {
+            height: 100%;
+            width: 100%;
+            background: var(--primary-color);
+            border-radius: 2px;
+            transition: background 0.3s ease;
+        }
+
+        .number-up-timer-progress.danger { background: var(--failure-color); }
+
+        /* --- Web wrapper only: page chrome --- */
+        html, body {
+            background: radial-gradient(circle at 50% 30%, #16283b 0%, #0a1420 100%) !important;
+        }
+
+        /* --- Web wrapper only: pre-game settings menu --- */
+        #web-settings-menu {
+            display: flex;
+            flex-direction: column;
+            background: linear-gradient(135deg, var(--background-gradient-1-alpha) 0%, var(--background-gradient-2-alpha) 100%);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 10px;
+            box-shadow: 0 6px 28px rgba(0,0,0,0.6);
+            width: 520px;
+            padding: 20px;
+        }
+
+        #web-settings-menu.hidden { display: none; }
+
+        .web-settings-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+
+        .web-settings-row label {
+            font-size: 13px;
+            color: var(--text-secondary-color);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .web-settings-row input[type="number"] {
+            width: 90px;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 4px;
+            color: var(--text-color);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 14px;
+            padding: 6px 8px;
+            text-align: right;
+        }
+
+        .web-settings-row input[type="number"]:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        .web-settings-hint {
+            font-size: 11px;
+            color: var(--text-secondary-color);
+            opacity: 0.7;
+            margin-top: -8px;
+            margin-bottom: 16px;
+        }
+
+        #web-start-button {
+            align-self: center;
+            margin-top: 6px;
+            background: linear-gradient(to bottom, rgba(45,212,168,0.35), rgba(26,140,111,0.35));
+            color: var(--text-color);
+            border: 1px solid var(--primary-color);
+            padding: 10px 30px;
+            font-size: 14px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: 'Share Tech Mono', monospace;
+            transition: all 0.15s;
+        }
+
+        #web-start-button:hover {
+            background: linear-gradient(to bottom, rgba(45,212,168,0.5), rgba(26,140,111,0.5));
+            box-shadow: 0 0 12px rgba(45,212,168,0.5);
+        }
+
+        /* --- LOCK SCREEN CORES --- */
+        #main-wrapper {
+            filter: blur(20px);
+            transition: filter 0.5s ease;
+            pointer-events: none;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #lock-screen {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(11, 15, 25, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+
+        .lock-icon {
+            font-size: 80px;
+            color: #ffcc44;
+            text-shadow: 0 0 20px rgba(204, 164, 59, 0.4);
+            animation: pulseLock 2s infinite ease-in-out;
+            cursor: default;
+        }
+
+        #device-id-display {
+            position: absolute;
+            bottom: 30px;
+            font-size: 14px;
+            color: #ffcc44;
+            opacity: 0.7;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        @keyframes pulseLock {
+            0%, 100% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.1); opacity: 1; text-shadow: 0 0 40px #ffcc44; }
+        }
+    </style>
+</head>
+
+<body>
+
+    <script type="module">
+        import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
+        
+        const supabaseUrl = 'https://hxzwvyovetiwmykeiznk.supabase.co';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4end2eW92ZXRpd215a2Vpem5rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5ODk1NDgsImV4cCI6MjA5MzU2NTU0OH0.jc4FiiHncItST_nlKkVpEb0V-aYLePCzy357aMMcbzE';
+        const supabase = createClient(supabaseUrl, supabaseKey);
+
+        async function checkApproval() {
+            let deviceId = localStorage.getItem('user_name');
+            
+            if (!deviceId) {
+                deviceId = 'ID-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+                localStorage.setItem('user_name', deviceId);
+            }
+
+            $('#device-id-display').text('DEVICE ID: ' + deviceId);
+
+            const { data, error } = await supabase
+                .from('requests')
+                .select('status')
+                .eq('name', deviceId)
+                .single();
+
+            if (!data) {
+                await supabase.from('requests').insert([{ name: deviceId, status: 'pending', minigame: 'Number Up Minigame' }]);
+                lockSite();
+            } else if (data.status === 'approved') {
+                unlockSite();
+            } else {
+                lockSite();
+            }
+
+            setTimeout(checkApproval, 3000); 
+        }
+
+        function unlockSite() {
+            $('#lock-screen').fadeOut();
+            $('#main-wrapper').css({
+                'filter': 'none',
+                'pointer-events': 'auto'
+            });
+        }
+
+        function lockSite() {
+            if ($('#lock-screen').is(':hidden')) {
+                $('#lock-screen').fadeIn();
+                $('#main-wrapper').css({
+                    'filter': 'blur(20px)',
+                    'pointer-events': 'none'
+                });
+                
+                // Safety hook to stop sequence logic if user is suddenly unapproved
+                if (window.numberUpGame && window.numberUpGame.active) {
+                    window.numberUpGame.endGame(false);
+                }
+            }
+        }
+
+        $(document).ready(() => {
+            checkApproval();
+        });
+    </script>
+
+    <div id="lock-screen">
+        <div class="lock-icon">🔒</div>
+        <div id="device-id-display">Connecting...</div>
+    </div>
+
+    <div id="main-wrapper">
+
+    <div class="audio-elements" style="display: none;">
+        <audio id="sound-click" preload="auto">
+            <source src="click.mp3" type="audio/mpeg">
+        </audio>
+        <audio id="sound-success" preload="auto">
+            <source src="success.mp3" type="audio/mpeg">
+        </audio>
+        <audio id="sound-failure" preload="auto">
+            <source src="failure.mp3" type="audio/mpeg">
+        </audio>
+        <audio id="sound-penalty" preload="auto">
+            <source src="penalty.mp3" type="audio/mpeg">
+        </audio>
+        <audio id="sound-buttonPress" preload="auto">
+            <source src="buttonPress.mp3" type="audio/mpeg">
+        </audio>
+    </div>
+
+    <!-- Web-only: settings menu shown before the minigame starts -->
+    <div id="web-settings-menu">
+
+        <div class="web-settings-row">
+            <label for="web-setting-count">Numbers</label>
+            <input type="number" id="web-setting-count" value="20" min="4" max="99">
+        </div>
+        <div class="web-settings-hint">How many numbers (1–N) to click in order</div>
+
+        <div class="web-settings-row">
+            <label for="web-setting-time">Time Limit (seconds)</label>
+            <input type="number" id="web-setting-time" value="15" min="5" max="180">
+        </div>
+        <div class="web-settings-hint">How long you have to finish the sequence</div>
+
+        <div class="web-settings-row">
+            <label for="web-setting-cols">Grid Columns</label>
+            <input type="number" id="web-setting-cols" value="5" min="2" max="10">
+        </div>
+        <div class="web-settings-hint">How many columns wide the number grid is</div>
+
+        <div class="web-settings-row">
+            <label for="web-setting-mistakes">Max Mistakes</label>
+            <input type="number" id="web-setting-mistakes" value="1" min="1" max="20">
+        </div>
+        <div class="web-settings-hint">Wrong clicks allowed before the sequence fails</div>
+
+        <button id="web-start-button">Start Sequence</button>
+    </div>
+
+    <div id="number-up-container" class="game-container">
+        <div class="hack-title">
+            <h2>NUMBER UP <span class="blink">[SEQUENCE LOCK]</span></h2>
+        </div>
+
+        <div class="number-up-header">
+            <div>
+                <span class="number-up-next-label">NEXT:</span>
+                <span class="number-up-next-value" id="number-up-next">1</span>
+            </div>
+            <div class="number-up-stats">
+                Done: <span id="number-up-progress-text">0 / 20</span> &nbsp;|&nbsp;
+                Errors: <span id="number-up-mistakes">0</span>/<span id="number-up-max-mistakes">3</span>
+            </div>
+        </div>
+
+        <div class="number-up-progress-bar">
+            <div class="number-up-progress-fill"></div>
+        </div>
+
+        <div id="number-up-grid"></div>
+
+        <div class="number-up-bottom">
+            <span>Click numbers in order from 1 upward</span>
+            <span id="number-up-message">Find the next number!</span>
+        </div>
+
+        <div class="number-up-timer-bar">
+            <div class="number-up-timer-progress"></div>
+        </div>
+    </div>
+
+    </div>
+
+    <script>
+        // -- Glitch Minigames
+        // -- Copyright (C) 2024 Glitch
+        // -- 
+        // -- This program is free software: you can redistribute it and/or modify
+        // -- it under the terms of the GNU General Public License as published by
+        // -- the Free Software Foundation, either version 3 of the License, or
+        // -- (at your option) any later version.
+        // -- 
+        // -- This program is distributed in the hope that it will be useful,
+        // -- but WITHOUT ANY WARRANTY; without even the implied warranty of
+        // -- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+        // -- GNU General Public License for more details.
+        // -- 
+        // -- You should have received a copy of the GNU General Public License
+        // -- along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+        // Number Up Minigame - Click numbers in ascending order before time runs out
+
+        let numberUpGame = {
+            active: false,
+            config: null,
+            timerInterval: null,
+            timeRemaining: 0,
+            nextNumber: 1,
+            mistakes: 0,
+
+            start: function(config) {
+                console.log('[NumberUp] start() called');
+                if (this.active) return;
+
+                this.config = {
+                    count: config.count || 20,             // how many numbers (1–N)
+                    timeLimit: config.timeLimit || 30000,  // ms
+                    gridCols: config.gridCols || 4,        // grid columns
+                    maxMistakes: config.maxMistakes || 3   // wrong clicks before fail
+                };
+
+                this.active = true;
+                this.nextNumber = 1;
+                this.mistakes = 0;
+                this.timeRemaining = this.config.timeLimit;
+
+                const self = this;
+                $('#number-up-container').fadeIn(200, function() {
+                    self.buildGrid();
+                    self.startTimer();
+                });
+            },
+
+            buildGrid: function() {
+                // Build shuffled number array
+                const nums = [];
+                for (let i = 1; i <= this.config.count; i++) nums.push(i);
+                for (let i = nums.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [nums[i], nums[j]] = [nums[j], nums[i]];
+                }
+
+                const $grid = $('#number-up-grid');
+                $grid.empty();
+                $grid.css('grid-template-columns', 'repeat(' + this.config.gridCols + ', 1fr)');
+
+                const self = this;
+                nums.forEach(function(n) {
+                    const $cell = $('<div></div>')
+                        .addClass('number-up-cell')
+                        .attr('data-number', n)
+                        .text(n)
+                        .on('click', function() { self.handleClick(n, $(this)); });
+                    $grid.append($cell);
+                });
+
+                this.updateDisplay();
+            },
+
+            updateDisplay: function() {
+                const remaining = this.config.count - (this.nextNumber - 1);
+                $('#number-up-next').text(this.nextNumber > this.config.count ? '—' : this.nextNumber);
+                $('#number-up-progress-text').text((this.nextNumber - 1) + ' / ' + this.config.count);
+                $('#number-up-mistakes').text(this.mistakes);
+                $('#number-up-max-mistakes').text(this.config.maxMistakes);
+
+                // Progress bar fill (completion progress, not timer)
+                const pct = ((this.nextNumber - 1) / this.config.count) * 100;
+                $('.number-up-progress-fill').css('width', pct + '%');
+            },
+
+            handleClick: function(n, $cell) {
+                if (!this.active) return;
+                if ($cell.hasClass('nu-clicked')) return;
+
+                if (n === this.nextNumber) {
+                    playSoundSafe('sound-buttonPress');
+                    $cell.addClass('nu-clicked').off('click');
+                    this.nextNumber++;
+                    this.updateDisplay();
+
+                    if (this.nextNumber > this.config.count) {
+                        this.endGame(true);
+                    }
+                } else {
+                    // Wrong number
+                    playSoundSafe('sound-penalty');
+                    this.mistakes++;
+                    $cell.addClass('nu-wrong');
+                    const self = this;
+                    setTimeout(function() { $cell.removeClass('nu-wrong'); }, 350);
+                    this.updateDisplay();
+
+                    if (this.mistakes >= this.config.maxMistakes) {
+                        this.endGame(false);
+                    }
+                }
+            },
+
+            startTimer: function() {
+                const self = this;
+                this.timerInterval = setInterval(function() {
+                    if (!self.active) return;
+                    self.timeRemaining -= 50;
+                    const pct = Math.max(0, (self.timeRemaining / self.config.timeLimit) * 100);
+                    $('.number-up-timer-progress').css('width', pct + '%');
+                    if (pct <= 25) $('.number-up-timer-progress').addClass('danger');
+                    else $('.number-up-timer-progress').removeClass('danger');
+                    if (self.timeRemaining <= 0) self.endGame(false);
+                }, 50);
+            },
+
+            endGame: function(success) {
+                if (!this.active) return;
+                this.active = false;
+                clearInterval(this.timerInterval);
+                this.timerInterval = null;
+
+                playSoundSafe(success ? 'sound-success' : 'sound-failure');
+                $('#number-up-message').text(success ? 'SEQUENCE COMPLETE' : 'SEQUENCE FAILED');
+
+                const resultData = {
+                    success: success,
+                    reached: this.nextNumber - 1,
+                    total: this.config.count,
+                    mistakes: this.mistakes
+                };
+
+                setTimeout(function() {
+                    $('#number-up-container').fadeOut(500, function() {
+                        $.post('https://glitch-minigames/numberUpResult', JSON.stringify(resultData));
+                    });
+                }, 700);
+            },
+
+            close: function() {
+                if (!this.active) return;
+                this.active = false;
+                clearInterval(this.timerInterval);
+                this.timerInterval = null;
+                $('#number-up-container').fadeOut(300);
+            }
+        };
+
+        window.numberUpGame = numberUpGame;
+    </script>
+
+    <script>
+        // ---------------------------------------------------------------
+        // Web wrapper (added only so the game can run standalone in a
+        // browser). Nothing above this point was changed:
+        //  - numberUpGame normally runs inside a game client that provides
+        //    playSoundSafe() and receives its result via a native (NUI)
+        //    callback at $.post('https://glitch-minigames/numberUpResult').
+        //  - Here we supply a safe playSoundSafe(), and swap only that one
+        //    result callback so it returns straight to the settings menu
+        //    (win or lose) instead of sending to a game client, since
+        //    there's no game client to send the result to.
+        // ---------------------------------------------------------------
+
+        // Sounds are best-effort: the referenced mp3 files aren't bundled
+        // with this standalone page, so failures are simply ignored.
+        window.playSoundSafe = function (id) {
+            try {
+                var el = document.getElementById(id);
+                if (el && typeof el.play === 'function') {
+                    el.currentTime = 0;
+                    var p = el.play();
+                    if (p && typeof p.catch === 'function') p.catch(function () {});
+                }
+            } catch (e) {}
+        };
+
+        (function () {
+            var realPost = $.post;
+            $.post = function (url) {
+                if (url === 'https://glitch-minigames/numberUpResult') {
+                    var data = arguments[1];
+                    var success = false;
+                    try { success = JSON.parse(data).success; } catch (e) {}
+                    if (success) {
+                        continueWebGame();
+                    } else {
+                        showWebSettingsMenu();
+                    }
+                    return $.Deferred().resolve().promise();
+                }
+                return realPost.apply($, arguments);
+            };
+        })();
+
+        function showWebSettingsMenu() {
+            $('#number-up-container').removeClass('active').hide();
+            $('#web-settings-menu').removeClass('hidden');
+        }
+
+        // On success, start the next round with the same settings instead
+        // of returning to the settings menu.
+        function continueWebGame() {
+            var cfg = numberUpGame.config || {};
+            $('.number-up-timer-progress').removeClass('danger').css('width', '100%');
+            $('#number-up-container').addClass('active').fadeIn(200, function() {
+                numberUpGame.start({
+                    count: cfg.count,
+                    timeLimit: cfg.timeLimit,
+                    gridCols: cfg.gridCols,
+                    maxMistakes: cfg.maxMistakes
+                });
+            });
+        }
+
+        function startWebGame() {
+            var count = parseInt($('#web-setting-count').val(), 10) || 20;
+            var seconds = parseInt($('#web-setting-time').val(), 10) || 30;
+            var cols = parseInt($('#web-setting-cols').val(), 10) || 4;
+            var maxMistakes = parseInt($('#web-setting-mistakes').val(), 10) || 3;
+
+            $('#web-settings-menu').addClass('hidden');
+            $('#number-up-container').addClass('active').hide();
+            $('.number-up-timer-progress').removeClass('danger').css('width', '100%');
+            numberUpGame.start({
+                count: count,
+                timeLimit: seconds * 1000,
+                gridCols: cols,
+                maxMistakes: maxMistakes
+            });
+        }
+
+        $(document).ready(function () {
+            showWebSettingsMenu();
+            $('#web-start-button').on('click', startWebGame);
+        });
+    </script>
+
+</body>
+</html>
